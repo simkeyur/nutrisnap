@@ -39,6 +39,26 @@
             max-width: 80%;
             word-wrap: break-word;
         }
+        .chat-bubble ul {
+            list-style: disc;
+            padding-left: 1.5rem;
+            margin-top: 0.5rem;
+            margin-bottom: 0.5rem;
+        }
+        /* Styles for maximized chat window */
+        #chat-container.maximized {
+            position: fixed;
+            inset: 0;
+            background: white;
+            z-index: 100;
+            padding: 1rem;
+            display: flex;
+            flex-direction: column;
+        }
+        #chat-container.maximized #chat-log {
+            flex-grow: 1;
+            height: auto; /* Override fixed height */
+        }
     </style>
 </head>
 <body class="bg-gray-50 text-gray-800 flex items-center justify-center min-h-screen p-4">
@@ -123,8 +143,14 @@
                 </blockquote>
 
                 <!-- Chat Interface -->
-                <div class="mt-8 pt-6 border-t border-gray-200">
-                    <h3 class="text-lg font-bold text-center text-gray-800 mb-4">Have a Question?</h3>
+                <div id="chat-container" class="mt-8 pt-6 border-t border-gray-200 relative">
+                    <div class="flex justify-between items-center mb-4">
+                        <h3 class="text-lg font-bold text-gray-800">Have a Question?</h3>
+                        <button id="toggle-chat-size-btn" class="p-2 text-gray-500 hover:text-gray-800 focus:outline-none focus:ring-2 focus:ring-blue-500 rounded-md">
+                            <svg id="maximize-icon" xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/></svg>
+                            <svg id="minimize-icon" xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="hidden"><path d="M8 3v3a2 2 0 0 1-2 2H3m18 0h-3a2 2 0 0 1-2-2V3m0 18v-3a2 2 0 0 1 2-2h3M3 16h3a2 2 0 0 1 2 2v3"/></svg>
+                        </button>
+                    </div>
                     <div id="chat-log" class="flex flex-col space-y-3 mb-4 h-48 overflow-y-auto p-3 bg-gray-50 rounded-lg border">
                         <!-- Chat messages will be appended here -->
                     </div>
@@ -183,9 +209,13 @@
             const errorMessage = document.getElementById('error-message');
             const closeErrorBtn = document.getElementById('close-error-btn');
 
+            const chatContainer = document.getElementById('chat-container');
             const chatForm = document.getElementById('chat-form');
             const chatInput = document.getElementById('chat-input');
             const chatLog = document.getElementById('chat-log');
+            const toggleChatSizeBtn = document.getElementById('toggle-chat-size-btn');
+            const maximizeIcon = document.getElementById('maximize-icon');
+            const minimizeIcon = document.getElementById('minimize-icon');
             
             const apiKeyGroup = document.getElementById('api-key-group');
             const modelSelectionGroup = document.getElementById('model-selection-group');
@@ -203,7 +233,7 @@
             const API_BASE_URL = `https://generativelanguage.googleapis.com/v1beta/models/`;
             const IMAGE_ANALYSIS_PROMPT = `You are NutriSnap, a helpful and friendly nutrition assistant.
 When you receive an image for the first time in a conversation, your task is to analyze the food in it. Provide the estimated total calories and a breakdown of macronutrients (protein, carbohydrates, fat) in grams. Also, provide a brief, encouraging, and positive one-sentence summary about the meal. Respond ONLY in a valid JSON format with the following structure: { "calories": number, "protein": number, "carbs": number, "fat": number, "summary": "string" }. If the image does not contain any food, respond with { "error": "Not food" }.`;
-            const CHAT_PROMPT = `You are NutriSnap, a helpful nutrition assistant. You have already provided the user with a nutritional analysis of their meal. Now, answer their follow-up questions in a conversational and helpful way, based on the nutritional context provided in the conversation history.`;
+            const CHAT_PROMPT = `You are NutriSnap, a helpful nutrition assistant. You have already provided the user with a nutritional analysis of their meal. Now, answer their follow-up questions in a conversational and helpful way, based on the nutritional context provided in the conversation history. Format your response using simple markdown (bold, italics, and unordered lists).`;
 
 
             // --- UI View Management ---
@@ -441,6 +471,45 @@ When you receive an image for the first time in a conversation, your task is to 
             };
 
             // --- Chat Functionality ---
+             const parseMarkdown = (text) => {
+                const lines = text.split('\n');
+                let html = '';
+                let inList = false;
+
+                for (const line of lines) {
+                    if (line.trim().startsWith('* ') || line.trim().startsWith('- ')) {
+                        if (!inList) {
+                            html += '<ul>';
+                            inList = true;
+                        }
+                        let listItem = line.trim().substring(2);
+                        // Sanitize content inside list item
+                        listItem = listItem.replace(/</g, "&lt;").replace(/>/g, "&gt;");
+                        // Apply markdown
+                        listItem = listItem.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>').replace(/\*(.*?)\*/g, '<em>$1</em>');
+                        html += `<li>${listItem}</li>`;
+                    } else {
+                        if (inList) {
+                            html += '</ul>';
+                            inList = false;
+                        }
+                        // Sanitize content
+                        let processedLine = line.replace(/</g, "&lt;").replace(/>/g, "&gt;");
+                        // Apply markdown
+                        processedLine = processedLine.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>').replace(/\*(.*?)\*/g, '<em>$1</em>');
+                        html += processedLine + '<br>';
+                    }
+                }
+
+                if (inList) {
+                    html += '</ul>';
+                }
+                if (html.endsWith('<br>')) {
+                    html = html.slice(0, -4);
+                }
+                return html;
+            };
+            
             const appendMessageToChatLog = (text, role, isLoading = false) => {
                 const messageDiv = document.createElement('div');
                 messageDiv.classList.add('p-3', 'rounded-xl', 'chat-bubble');
@@ -453,7 +522,7 @@ When you receive an image for the first time in a conversation, your task is to 
                     if (isLoading) {
                         messageDiv.innerHTML = `<div class="flex items-center justify-center gap-1.5"><div class="w-2 h-2 bg-gray-500 rounded-full animate-bounce"></div><div class="w-2 h-2 bg-gray-500 rounded-full animate-bounce" style="animation-delay: 0.1s;"></div><div class="w-2 h-2 bg-gray-500 rounded-full animate-bounce" style="animation-delay: 0.2s;"></div></div>`;
                     } else {
-                        messageDiv.textContent = text;
+                        messageDiv.innerHTML = parseMarkdown(text);
                     }
                 }
                 chatLog.appendChild(messageDiv);
@@ -521,6 +590,11 @@ When you receive an image for the first time in a conversation, your task is to 
             scanAnotherBtn.addEventListener('click', resetUI);
             chatForm.addEventListener('submit', handleChatSubmit);
             closeErrorBtn.addEventListener('click', () => errorModal.classList.add('hidden'));
+            toggleChatSizeBtn.addEventListener('click', () => {
+                chatContainer.classList.toggle('maximized');
+                maximizeIcon.classList.toggle('hidden');
+                minimizeIcon.classList.toggle('hidden');
+            });
 
             // --- Initial Load ---
             loadApiKey();
